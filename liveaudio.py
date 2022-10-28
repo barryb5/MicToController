@@ -1,3 +1,5 @@
+from email.mime import audio
+from platform import release
 from re import A
 from tkinter import N
 from subprocess import call
@@ -6,6 +8,7 @@ import vgamepad as vg
 import pygame, time
 import sounddevice as sd
 from pygame.locals import *
+from threading import Thread
 import sys
 
 # initialising pygame
@@ -19,7 +22,7 @@ controller = pygame.joystick.Joystick(0)
 controller.init()
 
 save_values = [0] * 10
-recent_strength = 0
+recent_strength = threading.lock()
 gamepad = vg.VX360Gamepad()
 gamepad.reset()
 
@@ -32,7 +35,9 @@ def print_sound(indata, outdata, frames, time, status):
     # print(int(volume_norm))
     averaged_of_10 = sum(save_values) / len(save_values)
     print("Sofened list value: {0}".format(averaged_of_10))
+    recent_strength.aquire()
     recent_strength = averaged_of_10
+    recent_strength.lock()
 
     # controller_output(averaged_of_10)
     # controller_output(50)
@@ -40,6 +45,8 @@ def print_sound(indata, outdata, frames, time, status):
 def controller_output(strength):
     #left right, up down
     direction = [0, 0]
+    long_thing = False
+    strummer = False
     # Trust me on these numbers I tested them
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -86,6 +93,11 @@ def controller_output(strength):
             if event.button == 4:
                 button_holdings[4] = False
                 print("Released orange")
+        
+        if (event.type == pygame.JOYAXISMOTION and event.axis == 2):
+            long_thing = True
+        if (event.type == pygame.JOYHATMOTION and event.hat == 0):
+            strummer = True
 
     if (button_holdings[0]):
         direction[0] += -1
@@ -115,20 +127,45 @@ def controller_output(strength):
     x_direction = direction[0] * abs(np.cos(angle)*input_strength)
     y_direction = direction[1] * abs(np.sin(angle)*input_strength)
     
-    gamepad.left_joystick_float(x_direction, y_direction)
-    gamepad.update()
+    sendInputs(x_direction, y_direction, long_thing, strummer)
+    # gamepad.left_joystick_float(x_direction, y_direction)
+    # gamepad.update()
     # gamepad.left_joystick(x_value=-10000, y_value=0)  # values between -32768 and 32767
     # gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)  # press the left hat button
     # gamepad.release_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT)  # press the left hat button
     # print("Power: {0}".format(input_strength))
-    print("X Direction: {0}".format(x_direction))
-    print("Y Direction: {0}".format(y_direction))
+    # print("X Direction: {0}".format(x_direction))
+    # print("Y Direction: {0}".format(y_direction))
     # print("Calculated Power: {0}".format(np.sqrt(np.square(x_direction) + np.square(y_direction))))
     
+def sendInputs(x_direction, y_direction, intake, shoot):
+    gamepad.left_joystick_float(x_direction, y_direction)
+    if (intake):
+        gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+    else:
+        gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_Y)
+    if (shoot):
+        gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER)
+    else:
+        gamepad.press_button(button=vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER)
+
+    gamepad.update()    
+
+def runAudio():
+    with sd.Stream(callback=print_sound):
+        time.sleep(20)
+
+gamepadThread = Thread(target=runInputs, daemon=True)
+audioThread = Thread(target=runAudio(), daemon=True)
+
+audioThread.start()
 
 
-with sd.Stream(callback=print_sound):
-    while (True):
-        # time.sleep(1)
-        controller_output(recent_strength)
+while(True):
+    recent_strength.aquire()
+    controller_output(recent_strength)
+    recent_strength.lock()
+    
+    # print("Recent Strength: {0}".format(recent_strength))
 
+audioThread.join()
